@@ -1,78 +1,684 @@
-<!doctype html>
-<html>
-    <head>
-        <script src="https://aframe.io/releases/1.0.4/aframe.min.js"></script>
-        <script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar.js"></script>
-        <script src="https://raw.githack.com/AR-js-org/studio-backend/master/src/modules/marker/tools/gesture-detector.js"></script>
-        <script src="https://raw.githack.com/AR-js-org/studio-backend/master/src/modules/marker/tools/gesture-handler.js"></script>
-        <script>
-            AFRAME.registerComponent('videohandler', {
-                init: function () {
-                    var marker = this.el;
-                    this.vid = document.querySelector("#vid");
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D 數位牙科治療計畫平台 (Pro Version)</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Icons (Lucide) -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    
+    <!-- PDF & Image Generation Libraries -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 
-                    marker.addEventListener('markerFound', function () {
-                        this.toggle = true;
-                        this.vid.play();
-                    }.bind(this));
+    <style>
+        /* 引入 Fonts: Noto Sans TC (主體), Dancing Script (簽名), Cookie (Donate按鈕) */
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&family=Dancing+Script:wght@600;700&family=Cookie&display=swap');
+        
+        body { font-family: 'Noto Sans TC', sans-serif; background-color: #ffffff; }
+        .teeth-scroll::-webkit-scrollbar { height: 6px; }
+        .teeth-scroll::-webkit-scrollbar-track { background: #f1f5f9; border-radius: 3px; }
+        .teeth-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+        
+        .tooth-container { transition: transform 0.1s ease; cursor: pointer; position: relative; }
+        .tooth-container:hover { transform: scale(1.15); z-index: 100; }
+        .tooth-container:active { transform: scale(0.95); }
+        
+        .tooth-visual { filter: none; shape-rendering: geometricPrecision; }
 
-                    marker.addEventListener('markerLost', function () {
-                        this.toggle = false;
-                        this.vid.pause();
-                    }.bind(this));
-                },
+        /* Watermark Signature Style - Cursive Update */
+        .watermark-signature {
+            font-family: 'Dancing Script', cursive; /* 草寫字體 */
+            color: #94a3b8; /* slate-400 */
+            font-weight: 700;
+            user-select: none;
+            pointer-events: none;
+        }
+
+        /* Donate Button Styles */
+        .font-cookie { font-family: 'Cookie', cursive; }
+        .coffee-btn {
+            background-color: #FFDD00;
+            color: #000000;
+            transition: all 0.3s ease;
+            box-shadow: 0px 4px 10px rgba(0, 0, 0, 0.1);
+        }
+        .coffee-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0px 6px 15px rgba(255, 221, 0, 0.3);
+        }
+        .coffee-btn:active {
+            transform: translateY(0);
+        }
+
+        /* Print adjustments */
+        @media print { 
+            .no-print { display: none !important; } 
+            body { background: white; } 
+            nav { display: none; } 
+            .shadow-none-print { box-shadow: none !important; border: 1px solid #ddd !important; }
+            input, textarea { border: none !important; padding: 0 !important; }
+            .item-delete-btn { display: none !important; }
+            .add-item-panel { display: none !important; }
+        }
+    </style>
+</head>
+<body class="text-slate-900 min-h-screen flex flex-col">
+
+    <!-- Navbar -->
+    <nav class="bg-white border-b-2 border-slate-800 px-6 py-3 flex flex-wrap justify-between items-center z-50 sticky top-0 no-print gap-3">
+        <div class="flex items-center gap-3">
+            <div class="bg-slate-900 text-white p-2 rounded-lg"><i data-lucide="tooth" class="w-6 h-6"></i></div>
+            <div>
+                <h1 class="text-xl font-bold text-slate-900 tracking-tight">數位治療計畫平台</h1>
+                <p class="text-xs text-gray-500">Professional Edition (Auto-Calc)</p>
+            </div>
+        </div>
+        <div class="flex gap-2 sm:gap-3 items-center flex-wrap">
+            <button onclick="resetAllData()" class="flex items-center gap-2 px-3 py-2 text-sm font-bold text-red-600 bg-red-50 border-2 border-red-100 hover:bg-red-100 rounded-lg transition-colors">
+                <i data-lucide="trash-2" class="w-4 h-4"></i> <span class="hidden sm:inline">清除重置</span>
+            </button>
+            <div class="w-px h-8 bg-gray-200 mx-1 hidden sm:block"></div>
+            
+            <!-- Paper Size Selector -->
+            <select id="pdf-format" class="text-xs sm:text-sm font-bold text-slate-700 bg-slate-50 border-2 border-slate-200 rounded-lg px-2 py-2 outline-none focus:border-slate-800 transition-colors cursor-pointer hover:bg-white" title="選擇 PDF 輸出大小">
+                <option value="a4">A4</option>
+                <option value="a5">A5</option>
+            </select>
+
+            <button onclick="exportToJPG()" class="flex items-center gap-2 px-3 py-2 text-sm font-bold text-slate-800 bg-white border-2 border-slate-800 hover:bg-slate-50 rounded-lg transition-colors"><i data-lucide="image" class="w-4 h-4"></i> JPG</button>
+            <button onclick="exportToPDF()" class="flex items-center gap-2 px-4 py-2 text-sm font-bold text-white bg-slate-900 hover:bg-slate-800 rounded-lg shadow-md transition-colors border-2 border-slate-900"><i data-lucide="file-text" class="w-4 h-4"></i> PDF</button>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <main class="flex-1 w-full max-w-7xl mx-auto p-4 md:p-8 relative bg-white" id="export-container">
+        
+        <!-- Info Panel -->
+        <div class="bg-white rounded-none border-2 border-slate-800 p-6 mb-8 relative group transition-colors z-10" id="info-panel">
+            <div class="flex flex-wrap gap-6 items-end">
+                <div class="flex-1 min-w-[120px]">
+                    <label class="block text-xs font-bold text-slate-500 uppercase mb-1">病歷號碼 Chart No.</label>
+                    <input type="text" id="p-chart" oninput="saveLocal()" placeholder="輸入號碼..." class="w-full font-mono font-bold text-lg text-blue-800 border-b-2 border-slate-200 focus:border-blue-600 outline-none py-1 bg-transparent placeholder-slate-300 transition-colors">
+                </div>
+                <div class="flex-1 min-w-[180px]">
+                    <label class="block text-xs font-bold text-slate-500 uppercase mb-1">病患姓名 Name</label>
+                    <input type="text" id="p-name" oninput="saveLocal()" placeholder="輸入姓名..." class="w-full text-lg font-bold text-slate-900 border-b-2 border-slate-200 focus:border-slate-800 outline-none py-1 bg-transparent placeholder-slate-300">
+                </div>
+                <div class="flex-1 min-w-[130px]">
+                    <label class="block text-xs font-bold text-slate-500 uppercase mb-1">出生日期 DOB</label>
+                    <input type="date" id="p-dob" oninput="saveLocal()" class="w-full text-slate-900 border-b-2 border-slate-200 focus:border-slate-800 outline-none py-1 bg-transparent font-medium">
+                </div>
+                <div class="flex-1 min-w-[130px]">
+                    <label class="block text-xs font-bold text-slate-500 uppercase mb-1">看診日期 Date</label>
+                    <input type="date" id="date-input" oninput="saveLocal()" class="w-full font-medium text-slate-900 border-b-2 border-slate-200 focus:border-slate-800 outline-none py-1 bg-transparent">
+                </div>
+                <!-- 主治醫師 Doctor -->
+                <div class="flex-1 min-w-[150px]">
+                    <label class="block text-xs font-bold text-slate-500 uppercase mb-1">主治醫師 Doctor</label>
+                    <input type="text" id="p-doctor" oninput="saveLocal()" placeholder="輸入醫師姓名..." class="w-full font-medium text-slate-900 border-b-2 border-slate-200 focus:border-slate-800 outline-none py-1 bg-transparent placeholder-slate-300">
+                </div>
+            </div>
+            <div class="absolute top-2 right-2 text-[10px] text-slate-400 no-print">
+                <i data-lucide="hard-drive" class="w-3 h-3 inline"></i> 資料自動暫存於瀏覽器
+            </div>
+        </div>
+
+        <!-- Legend -->
+        <div class="flex flex-wrap gap-4 text-xs font-bold text-slate-500 mb-4 px-2 no-print relative z-10">
+            <span class="flex items-center gap-1"><i data-lucide="mouse-pointer-2" class="w-3 h-3"></i> 點擊切換：</span>
+            <span class="flex items-center gap-1"><span class="w-3 h-3 border border-black bg-[#F9F9F7]"></span> 自然牙</span>
+            <span class="flex items-center gap-1"><span class="w-3 h-3 border border-black bg-[#fed7aa]"></span> 假牙/牙橋</span>
+            <span class="flex items-center gap-1"><span class="w-3 h-3 border border-black bg-[#fed7aa] relative"><span class="absolute bottom-0 w-full h-1 bg-slate-400"></span></span> 植牙</span>
+            <span class="flex items-center gap-1 text-gray-400 border border-gray-300 px-1">空白</span> 缺牙
+        </div>
+
+        <!-- Chart 1: Current Status -->
+        <section class="bg-white rounded-none shadow-none border-2 border-slate-800 p-6 md:p-8 mb-8 relative overflow-hidden z-10">
+            <div class="absolute top-0 left-0 w-2 h-full bg-slate-200"></div>
+            <div class="flex justify-between items-center mb-6 pl-4 border-b-2 border-slate-100 pb-4">
+                <h2 class="text-xl font-bold text-slate-900 flex items-center gap-2"><i data-lucide="history" class="w-5 h-5"></i> 術前評估狀態 (Current Status)</h2>
+                <span class="text-xs font-black bg-slate-100 text-slate-600 px-3 py-1 border border-slate-300">BEFORE</span>
+            </div>
+            <div class="teeth-scroll overflow-x-auto pb-4"><div class="min-w-max px-4 flex flex-col items-center"><div class="flex justify-center items-start mb-2" id="current-upper"></div><div class="h-px bg-slate-200 w-[90%] my-6 flex items-center justify-center"></div><div class="flex justify-center items-start" id="current-lower"></div></div></div>
+        </section>
+
+        <!-- Plans Container -->
+        <div id="plans-container" class="relative z-10">
+            <!-- Plan sections will be injected here -->
+        </div>
+
+        <!-- Add Plan Button (No Print) -->
+        <div class="flex justify-center mb-12 no-print relative z-10">
+            <button onclick="addNewPlan()" class="flex items-center gap-2 px-6 py-3 bg-slate-800 text-white rounded-full font-bold hover:bg-slate-700 transition-all shadow-lg hover:shadow-xl transform hover:-translate-y-1">
+                <i data-lucide="plus-circle" class="w-5 h-5"></i> 新增治療計畫
+            </button>
+        </div>
+
+        <!-- Footer Signature Watermark (Hidden on Print) -->
+        <div class="mt-12 text-right border-t border-slate-100 pt-6 pr-8 relative z-10 no-print">
+            <span class="text-2xl watermark-signature">Dr. Yeh Yu-Chuan</span>
+        </div>
+
+        <!-- Donate Section (Hidden on Print/Export) -->
+        <!-- Center align with mx-auto, adjust margins -->
+        <div class="w-full flex justify-center mt-8 mb-12 no-print relative z-10">
+            <div class="max-w-md w-full bg-white rounded-2xl shadow-xl overflow-hidden border border-slate-100 transform transition-all hover:scale-[1.01]">
+                <!-- Header Image / Pattern -->
+                <div class="h-24 bg-slate-900 flex justify-center items-center relative overflow-hidden">
+                    <div class="absolute inset-0 opacity-10 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')]"></div>
+                    <i data-lucide="coffee" class="text-yellow-400 w-10 h-10 relative z-10"></i>
+                </div>
+
+                <!-- Content -->
+                <div class="px-8 py-6 text-center">
+                    <h3 class="text-xl font-bold text-slate-800 mb-2">喜歡這個工具嗎？</h3>
+                    <p class="text-slate-500 text-sm mb-6 leading-relaxed">
+                        如果您覺得這個牙科治療計畫平台對您的臨床工作有幫助，<br>歡迎請我喝杯咖啡，支持我繼續開發更多功能！
+                    </p>
+
+                    <!-- Donate Button -->
+                    <a href="https://buymeacoffee.com/sbeagle" target="_blank" rel="noopener noreferrer" class="coffee-btn w-full inline-flex justify-center items-center gap-2 px-6 py-3 rounded-full text-lg font-bold tracking-wide no-underline group">
+                        <span class="text-xl group-hover:animate-bounce">☕</span>
+                        <span class="font-cookie text-2xl pt-1">Buy me a coffee</span>
+                    </a>
+
+                    <!-- Footer -->
+                    <div class="mt-4 flex justify-center gap-2 text-slate-300 text-[10px]">
+                        <i data-lucide="heart" class="w-3 h-3 text-red-400 fill-current"></i>
+                        <span>感謝您的支持</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Logic Script -->
+    <script>
+        const UPPER_JAW = [18, 17, 16, 15, 14, 13, 12, 11, 21, 22, 23, 24, 25, 26, 27, 28];
+        const LOWER_JAW = [48, 47, 46, 45, 44, 43, 42, 41, 31, 32, 33, 34, 35, 36, 37, 38];
+        const STATUS = { NATURAL: 'natural', CROWN: 'crown', BRIDGE: 'bridge', IMPLANT: 'implant', MISSING: 'missing' };
+        const STATUS_CYCLE = [ STATUS.NATURAL, STATUS.CROWN, STATUS.BRIDGE, STATUS.IMPLANT, STATUS.MISSING ];
+
+        const TX_CATEGORIES = {
+            PERIO: { label: '牙周治療', color: 'bg-emerald-100 text-emerald-800 border-emerald-200' },
+            PROSTHO: { label: '假牙', color: 'bg-orange-100 text-orange-800 border-orange-200' },
+            IMPLANT: { label: '植牙', color: 'bg-blue-100 text-blue-800 border-blue-200' },
+            BONE: { label: '補骨', color: 'bg-indigo-100 text-indigo-800 border-indigo-200' },
+            GUM: { label: '補牙肉', color: 'bg-rose-100 text-rose-800 border-rose-200' },
+            DENTURE: { label: '活動假牙', color: 'bg-amber-100 text-amber-800 border-amber-200' },
+            OTHER: { label: '其他', color: 'bg-gray-100 text-gray-800 border-gray-200' }
+        };
+
+        // --- TOOTH PATHS UPDATED (Symmetric Cusps) ---
+        const TOOTH_PATHS = {
+            // Incisor
+            incisor: { 
+                crownOutline: "M0,35 Q0,20 10,18 L50,18 L58,20 Q60,25 60,35 L58,50 Q45,55 30,55 Q15,55 2,50 Z",
+                details: ["M15,20 L15,45", "M45,20 L45,40"], 
+                translucency: "M12,19 L48,19 L46,25 Q30,28 14,25 Z", 
+                root: "M2,50 Q10,100 25,115 Q30,118 35,115 Q50,100 58,50 Z" 
+            },
+            
+            // Canine
+            canine: { 
+                crownOutline: "M2,30 Q10,25 20,15 L30,5 L58,18 L58,35 L55,50 Q40,58 30,60 Q20,58 5,50 Z", 
+                details: ["M30,10 L30,50"], 
+                translucency: "M25,15 L30,10 L35,15 Z", 
+                root: "M5,50 Q15,100 28,120 Q30,123 32,120 Q45,100 55,50 Z" 
+            },
+            
+            // Premolar
+            premolar: { 
+                crownOutline: "M2,40 Q2,25 8,20 L20,10 L40,10 L52,20 Q58,25 58,40 L55,52 Q30,60 5,52 Z", 
+                details: ["M20,18 Q30,25 40,18", "M30,18 L30,45"], 
+                translucency: "", 
+                root: "M5,52 Q15,90 28,110 Q30,113 32,110 Q45,90 55,52 Z" 
+            },
+            
+            // --- Upper Molars ---
+            // Molar 1 (#6): 16, 26
+            // Shortened palatal root tip to match premolar height
+            molarUpperFirst: {
+                crownOutline: "M2,40 Q2,25 5,20 L15,15 L30,22 L45,15 L55,20 Q58,25 58,40 L58,52 Q30,60 2,52 Z",
+                details: ["M30,22 L30,45", "M15,15 L15,30", "M45,15 L45,30"],
+                // Base outline (Trident) + M22,80 Q32,65 42,80 (Inner furcation curve, opening UP)
+                root: "M2,52 Q-5,80 5,100 Q8,108 12,100 Q18,90 22,80 Q25,95 30,110 Q32,113 35,110 Q40,95 42,80 Q45,90 48,100 Q52,108 55,100 Q65,80 58,52 Z M22,80 Q32,65 42,80" 
+            },
+            // Molar 2 (#7): 17, 27
+            molarUpperSecond: {
+                crownOutline: "M2,40 Q2,25 5,20 L15,15 L30,22 L45,15 L55,20 Q58,25 58,40 L58,52 Q30,60 2,52 Z",
+                details: ["M30,22 L30,45", "M15,15 L15,30", "M45,15 L45,30"],
+                root: "M2,52 Q0,85 10,105 Q12,110 15,100 L22,85 Q30,80 38,85 L45,100 Q48,110 50,105 Q60,85 58,52 Z"
+            },
+            // Molar 3 (#8)
+            molarUpperThird: {
+                crownOutline: "M2,40 Q2,25 5,20 L10,15 L50,15 L55,20 Q58,25 58,40 L56,52 Q30,60 4,52 Z",
+                details: ["M30,15 L30,45"],
+                root: "M4,52 L15,100 Q30,115 45,100 L56,52 Z"
+            },
+            molarLowerFirst: {
+                crownOutline: "M0,40 Q0,25 2,22 L8,18 L20,22 L30,18 L45,22 L52,19 L58,22 Q60,25 60,40 L58,52 Q30,60 2,52 Z",
+                details: ["M20,22 L20,40", "M45,22 L45,40"],
+                root: "M2,52 Q-5,90 10,110 Q15,115 18,100 L30,80 L42,100 Q45,115 50,110 Q65,90 58,52 Z"
+            },
+            molarLowerSecond: {
+                crownOutline: "M2,40 Q2,25 5,20 L15,15 L30,22 L45,15 L55,20 Q58,25 58,40 L58,52 Q30,60 2,52 Z",
+                details: ["M30,22 L30,40", "M15,15 L15,30", "M45,15 L45,30"],
+                root: "M2,52 Q2,90 12,110 Q15,115 18,100 L30,85 L42,100 Q45,115 48,110 Q58,90 58,52 Z"
+            },
+            molarLowerThird: {
+                crownOutline: "M2,40 Q2,25 5,22 L55,22 Q58,25 58,40 L56,52 Q30,60 4,52 Z",
+                details: ["M30,22 L30,40"],
+                root: "M4,52 L15,100 Q30,115 45,100 L56,52 Z"
+            }
+        };
+        const IMPLANT_THREADS = [60, 68, 76, 84, 92];
+        
+        window.teethState = { current: {}, plans: [] };
+
+        // Helper Functions defined BEFORE usage
+        function getToothType(id) { const n = id % 10; if (n <= 2) return 'incisor'; if (n === 3) return 'canine'; if (n <= 5) return 'premolar'; return 'molar'; }
+
+        function renderToothSVG(id, status, isUpper) {
+            const type = getToothType(id);
+            const n = id % 10; 
+
+            let shape;
+            if (type === 'incisor') shape = TOOTH_PATHS.incisor;
+            else if (type === 'canine') shape = TOOTH_PATHS.canine;
+            else if (type === 'premolar') shape = TOOTH_PATHS.premolar;
+            else { 
+                if (isUpper) {
+                    if (n === 6) shape = TOOTH_PATHS.molarUpperFirst;
+                    else if (n === 7) shape = TOOTH_PATHS.molarUpperSecond;
+                    else shape = TOOTH_PATHS.molarUpperThird;
+                } else {
+                    if (n === 6) shape = TOOTH_PATHS.molarLowerFirst;
+                    else if (n === 7) shape = TOOTH_PATHS.molarLowerSecond;
+                    else shape = TOOTH_PATHS.molarLowerThird;
+                }
+            }
+            
+            const quad = Math.floor(id / 10);
+            let shouldFlipX = (quad === 2 || quad === 3); 
+            
+            let scaleX = 1, scaleY = 1, transX = 0, transY = 0;
+            
+            if (isUpper && n === 2) { 
+                scaleX = 0.85; 
+                scaleY = 0.9;  
+                transX = 5;    
+            }
+            if (!isUpper && n <= 2) {
+                scaleX = 0.78; 
+                scaleY = 0.9;
+                transX = 6;
+                transY = -6; 
+            }
+
+            const flipXStr = shouldFlipX ? "scale(-1, 1) translate(-60, 0)" : "";
+            const flipYStr = isUpper ? "scale(1, -1) translate(0, -120)" : "";
+            const anatomyTransform = `translate(${transX}, ${transY}) scale(${scaleX}, ${scaleY})`;
+            const finalTransform = `${flipYStr} ${flipXStr} ${anatomyTransform}`;
+
+            let rootFill="#ffffff", crownFill="#F9F9F7", stroke="#4A4A4A", strokeWidth="2", detailStroke="#D1D1D1", detailWidth="0.5";
+            let showRoot=true, showCrown=true, showImplant=false, showDetails=true;
+            if (status===STATUS.MISSING){ showRoot=false; showCrown=false; showDetails=false; }
+            else if(status===STATUS.CROWN){ crownFill="#fed7aa"; stroke="#000000"; showDetails=false; }
+            else if(status===STATUS.BRIDGE){ showRoot=false; crownFill="#fed7aa"; stroke="#000000"; showDetails=false; }
+            else if(status===STATUS.IMPLANT){ showRoot=false; showImplant=true; crownFill="#fed7aa"; stroke="#000000"; showDetails=false; }
+
+            let content = `<g transform="${finalTransform}">`;
+            if (status === STATUS.MISSING) return content + `</g>`; 
+            if (showImplant) {
+                let w = 45; 
+                let x = (60 - w) / 2; 
+                
+                if (type === 'molar') { w = 55; x = 2.5; }
+                else if (type === 'incisor' && n === 2) { w = 40; x = 10; } 
+                else if (type === 'incisor' && !isUpper) { w = 35; x = 12.5; }
+                
+                const topY = 52; 
+                const length = 50;
+                const bottomY = topY + length;
+                const taperAmount = 5; 
+                
+                const impBody = `M${x},${topY} L${x+w},${topY} L${x+w-taperAmount},${bottomY} L${x+taperAmount},${bottomY} Z`;
+                
+                content += `<path d="${impBody}" fill="#94a3b8" stroke="${stroke}" stroke-width="${strokeWidth}" />`;
+                
+                for(let i=0; i<5; i++) {
+                    let y = topY + 2 + (i*2);
+                    content += `<line x1="${x}" y1="${y}" x2="${x+w}" y2="${y}" stroke="#64748b" stroke-width="0.5" />`;
+                }
+                
+                for(let i=0; i<6; i++) {
+                    let y = topY + 15 + (i*6);
+                    let currentW = w - (i * (taperAmount*2)/10); 
+                    let currentX = x + (i * taperAmount/10);
+                    content += `<path d="M${currentX},${y} L${currentX+currentW},${y-2} L${currentX+currentW},${y} L${currentX},${y+2} Z" fill="#64748b" opacity="0.4" />`;
+                }
+            }
+            if (showRoot) content += `<path d="${shape.root}" fill="${rootFill}" stroke="${stroke}" stroke-width="${strokeWidth}" />`;
+            if (showCrown) {
+                content += `<path d="${shape.crownOutline}" fill="${crownFill}" stroke="${stroke}" stroke-width="${strokeWidth}" stroke-linejoin="round" />`;
+                if (status === STATUS.NATURAL && shape.translucency) content += `<path d="${shape.translucency}" fill="#94a3b8" fill-opacity="0.2" stroke="none" />`;
+                if (status === STATUS.NATURAL && shape.details && showDetails) shape.details.forEach(d => { content += `<path d="${d}" fill="none" stroke="${detailStroke}" stroke-width="${detailWidth}" stroke-linecap="round" />`; });
+            }
+            content += `</g>`;
+            return content;
+        }
+
+        window.renderChart = (chartTypeOrIndex) => { 
+            let targetTeeth;
+            let containerPrefix;
+
+            if (chartTypeOrIndex === 'current') {
+                targetTeeth = window.teethState.current;
+                containerPrefix = 'current';
+            } else {
+                const index = chartTypeOrIndex;
+                targetTeeth = window.teethState.plans[index].teeth;
+                containerPrefix = `plan-${index}`;
+            }
+
+            const upperContainer = document.getElementById(`${containerPrefix}-upper`);
+            const lowerContainer = document.getElementById(`${containerPrefix}-lower`);
+            if (!upperContainer || !lowerContainer) return; 
+
+            const makeWrapper = (id, jawType) => {
+                const data = targetTeeth[id];
+                const isUpper = jawType === 'upper';
+                const marginClass = '-ml-1.5'; 
+                
+                return `
+                <div class="relative w-[50px] h-[160px] flex flex-col ${isUpper ? 'justify-end' : 'justify-start'} flex-shrink-0 tooth-container select-none group ${marginClass} first:ml-0"
+                     onclick="cycleToothStatus(${id}, '${chartTypeOrIndex}')">
+                    ${isUpper ? `<div class="w-full text-center text-[24px] font-bold font-mono text-slate-400 group-hover:text-blue-600 mb-2">${id}</div>` : ''}
+                    <svg width="100%" height="120px" viewBox="0 0 60 120" class="overflow-visible tooth-visual flex-shrink-0">${renderToothSVG(id, data.status, isUpper)}</svg>
+                    ${!isUpper ? `<div class="w-full text-center text-[24px] font-bold font-mono text-slate-400 group-hover:text-blue-600 mt-2">${id}</div>` : ''}
+                </div>`;
+            };
+            upperContainer.innerHTML = UPPER_JAW.map(id => makeWrapper(id, 'upper')).join('');
+            lowerContainer.innerHTML = LOWER_JAW.map(id => makeWrapper(id, 'lower')).join('');
+        }
+
+        // Logic Functions
+        window.cycleToothStatus = (id, chartTypeOrIndex) => {
+            let targetObj;
+            if (chartTypeOrIndex === 'current') {
+                targetObj = window.teethState.current;
+            } else {
+                targetObj = window.teethState.plans[chartTypeOrIndex].teeth;
+            }
+            const currentStatus = targetObj[id].status;
+            const nextStatus = STATUS_CYCLE[(STATUS_CYCLE.indexOf(currentStatus) + 1) % STATUS_CYCLE.length];
+            targetObj[id].status = nextStatus;
+            
+            window.renderChart(chartTypeOrIndex);
+            window.saveLocal();
+        }
+
+        window.saveLocal = () => {
+            const data = {
+                chartNo: document.getElementById('p-chart').value,
+                name: document.getElementById('p-name').value,
+                dob: document.getElementById('p-dob').value,
+                visitDate: document.getElementById('date-input').value,
+                doctorName: document.getElementById('p-doctor').value,
+                teethCurrent: window.teethState.current,
+                teethPlans: window.teethState.plans
+            };
+            localStorage.setItem('dentalChartData', JSON.stringify(data));
+        };
+
+        function calculateTotal(planIndex) {
+            const items = window.teethState.plans[planIndex].items;
+            let sum = 0;
+            items.forEach(item => { const val = parseFloat(item.price); if (!isNaN(val)) sum += val; });
+            window.teethState.plans[planIndex].totalFee = sum;
+            const feeInput = document.getElementById(`fee-display-${planIndex}`);
+            if (feeInput) feeInput.value = sum.toLocaleString();
+            window.saveLocal();
+        }
+
+        window.updateItem = (planIndex, itemIndex, field, value) => {
+            window.teethState.plans[planIndex].items[itemIndex][field] = value;
+            if (field === 'price') calculateTotal(planIndex);
+            else window.saveLocal();
+        };
+
+        window.deleteItem = (planIndex, itemIndex) => {
+            window.teethState.plans[planIndex].items.splice(itemIndex, 1);
+            calculateTotal(planIndex);
+            window.renderPlans();
+        };
+
+        window.addItem = (planIndex, categoryKey) => {
+            window.teethState.plans[planIndex].items.push({ category: categoryKey, desc: '', price: '' });
+            window.renderPlans();
+            window.saveLocal();
+        };
+
+        window.renderPlans = () => {
+            const container = document.getElementById('plans-container');
+            container.innerHTML = ''; 
+            window.teethState.plans.forEach((plan, index) => {
+                let currentTotal = 0;
+                plan.items.forEach(item => { const val = parseFloat(item.price); if (!isNaN(val)) currentTotal += val; });
+
+                let itemsHtml = '';
+                if (plan.items && plan.items.length > 0) {
+                    itemsHtml = plan.items.map((item, i) => {
+                        const catConfig = TX_CATEGORIES[item.category] || TX_CATEGORIES.OTHER;
+                        return `<div class="flex items-center gap-2 mb-2 group/item"><span class="flex-shrink-0 w-24 text-center text-xs font-bold px-2 py-1.5 rounded border ${catConfig.color}">${catConfig.label}</span><input type="text" value="${item.desc}" oninput="updateItem(${index}, ${i}, 'desc', this.value)" placeholder="治療細節描述..." class="flex-1 min-w-[100px] text-sm text-slate-700 bg-slate-50 border-b border-transparent focus:border-slate-400 focus:bg-white outline-none px-2 py-1 transition-colors rounded"><div class="flex items-center relative"><span class="absolute left-2 text-xs text-slate-400">$</span><input type="number" value="${item.price}" oninput="updateItem(${index}, ${i}, 'price', this.value)" placeholder="0" class="w-24 text-right text-sm font-mono text-slate-700 bg-slate-50 border-b border-transparent focus:border-slate-400 focus:bg-white outline-none pl-4 pr-2 py-1 transition-colors rounded"></div><button onclick="deleteItem(${index}, ${i})" class="item-delete-btn p-1 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded transition-colors" title="刪除項目"><i data-lucide="x" class="w-4 h-4"></i></button></div>`;
+                    }).join('');
+                } else {
+                    itemsHtml = `<div class="text-center py-6 text-sm text-slate-400 italic bg-slate-50 rounded border border-dashed border-slate-200">尚無治療項目，請點擊上方按鈕新增</div>`;
+                }
+
+                const buttonsHtml = Object.keys(TX_CATEGORIES).map(key => {
+                    const cat = TX_CATEGORIES[key];
+                    return `<button onclick="addItem(${index}, '${key}')" class="px-2 py-1 text-xs font-bold rounded border bg-white hover:opacity-80 transition-all shadow-sm ${cat.color.replace('bg-', 'border-').replace('text-', 'text-slate-600 ')} hover:shadow-md">+ ${cat.label}</button>`;
+                }).join('');
+
+                const planHTML = `<section class="bg-white rounded-none shadow-none border-2 border-slate-800 p-6 md:p-8 relative overflow-hidden mb-8 page-break-inside-avoid z-10"><div class="absolute top-0 left-0 w-2 h-full bg-blue-600"></div><div class="flex justify-between items-center mb-6 pl-4 border-b-2 border-slate-100 pb-4"><h2 class="text-xl font-bold text-blue-900 flex items-center gap-2"><i data-lucide="clipboard-check" class="w-5 h-5"></i> 建議治療計畫 ${plan.title}</h2><span class="text-xs font-black bg-blue-100 text-blue-800 px-3 py-1 border border-blue-200">PLAN ${String.fromCharCode(65 + index)}</span></div><div class="teeth-scroll overflow-x-auto pb-4 mb-6"><div class="min-w-max px-4 flex flex-col items-center"><div class="flex justify-center items-start mb-2" id="plan-${index}-upper"></div><div class="h-px bg-slate-200 w-[90%] my-6 flex items-center justify-center"></div><div class="flex justify-center items-start" id="plan-${index}-lower"></div></div></div><div class="flex flex-col lg:flex-row gap-8"><div class="flex-1"><div class="flex flex-wrap gap-2 mb-4 add-item-panel"><span class="text-xs font-bold text-slate-400 flex items-center mr-1">新增:</span>${buttonsHtml}</div><div class="bg-white rounded p-1 min-h-[100px]"><div class="flex text-[10px] font-bold text-slate-400 px-2 mb-1 uppercase tracking-wider"><div class="w-24 text-center">類別</div><div class="flex-1">項目描述</div><div class="w-24 text-right pr-6">金額 (NT$)</div><div class="w-6"></div></div>${itemsHtml}</div></div><div class="w-full lg:w-64 flex flex-col justify-end border-t lg:border-t-0 lg:border-l border-slate-100 pt-4 lg:pt-0 lg:pl-6"><div class="bg-slate-50 p-4 rounded border border-slate-100"><label class="block text-xs font-bold text-slate-500 uppercase mb-2 text-right">預估總費用 Total Fee</label><div class="flex items-center justify-end gap-2 text-slate-900"><span class="text-xl font-bold">NT$</span><input type="text" id="fee-display-${index}" value="${currentTotal.toLocaleString()}" readonly class="w-32 bg-transparent text-3xl font-mono font-bold text-right outline-none text-blue-900 border-b-2 border-slate-300 pb-1"></div><p class="text-[10px] text-slate-400 text-right mt-2">* 此為預估費用，實際依療程狀況調整</p></div></div></div></section>`;
+                container.insertAdjacentHTML('beforeend', planHTML);
+                window.renderChart(index); 
             });
-        </script>
-    </head>
+            lucide.createIcons();
+        };
 
-    <body style="margin: 0; overflow: hidden;">
-        <a-scene
-            vr-mode-ui="enabled: false"
-            loading-screen="enabled: false;"
-            arjs='sourceType: webcam; debugUIEnabled: false;'
-            id="scene"
-            embedded
-            gesture-detector
-        >
-            <a-assets>
-                <video
-                    id="vid"
-                    src="assets/VID_20211128_215043.mp4"
-                    preload="auto"
-                    response-type="arraybuffer"
-                    loop
-                    crossorigin
-                    webkit-playsinline
-                    autoplay
-                    playsinline
-                ></video>
-            </a-assets>
+        window.addNewPlan = () => {
+            const planIndex = window.teethState.plans.length;
+            const planTitle = `計畫 ${String.fromCharCode(65 + planIndex)}`;
+            const newTeeth = {};
+            [...UPPER_JAW, ...LOWER_JAW].forEach(id => { newTeeth[id] = { id, status: STATUS.NATURAL }; });
+            window.teethState.plans.push({ id: `plan-${planIndex}`, title: planTitle, teeth: newTeeth, items: [], totalFee: 0 });
+            window.renderPlans();
+            window.saveLocal();
+        };
 
-            <a-marker
-                type="pattern"
-                preset="custom"
-                url="assets/marker.patt"
-                videohandler
-                smooth="true"
-                smoothCount="10"
-                smoothTolerance="0.01"
-                smoothThreshold="5"
-                raycaster="objects: .clickable"
-                emitevents="true"
-                cursor="fuse: false; rayOrigin: mouse;"
-                id="markerA"
-            >
-                <a-video
-                    src="#vid"
-                    scale="1 1 1"
-                    position="0 0.1 0"
-                    rotation="-90 0 0"
-                    class="clickable"
-                    gesture-handler
-                ></a-video>
-            </a-marker>
+        function initDefaultPlans() {
+            window.teethState.plans = [];
+            window.addNewPlan();
+        }
 
-            <a-entity camera></a-entity>
-        </a-scene>
-    </body>
+        function initDefaultAll() {
+            [...UPPER_JAW, ...LOWER_JAW].forEach(id => {
+                window.teethState.current[id] = { id, status: STATUS.NATURAL };
+            });
+            document.getElementById('date-input').valueAsDate = new Date();
+            initDefaultPlans();
+        }
+
+        function initData() {
+            const stored = localStorage.getItem('dentalChartData');
+            if (stored) {
+                try {
+                    const data = JSON.parse(stored);
+                    document.getElementById('p-chart').value = data.chartNo || '';
+                    document.getElementById('p-name').value = data.name || '';
+                    document.getElementById('p-dob').value = data.dob || '';
+                    document.getElementById('date-input').value = data.visitDate || '';
+                    document.getElementById('p-doctor').value = data.doctorName || '';
+                    
+                    if (data.teethCurrent) window.teethState.current = data.teethCurrent;
+                    
+                    if (data.teethPlans && data.teethPlans.length > 0) {
+                        window.teethState.plans = data.teethPlans;
+                    } else {
+                        initDefaultPlans();
+                    }
+                } catch(e) {
+                    console.error("Local data parse error", e);
+                    initDefaultAll();
+                }
+            } else {
+                initDefaultAll();
+            }
+            window.renderChart('current');
+            window.renderPlans();
+            lucide.createIcons();
+        }
+
+        window.resetAllData = () => {
+            if(confirm("確定要清除所有資料重置嗎？")) {
+                localStorage.removeItem('dentalChartData');
+                document.getElementById('p-chart').value = '';
+                document.getElementById('p-name').value = '';
+                document.getElementById('p-dob').value = '';
+                document.getElementById('p-doctor').value = '';
+                initDefaultAll();
+                window.renderChart('current');
+                window.renderPlans();
+            }
+        };
+
+        async function generateSnapshots(format) {
+            const plans = document.querySelectorAll('#plans-container > section');
+            const exportContainer = document.getElementById('export-container');
+            
+            const originalStyles = {
+                width: exportContainer.style.width,
+                minWidth: exportContainer.style.minWidth,
+                height: exportContainer.style.height,
+                minHeight: exportContainer.style.minHeight,
+                margin: exportContainer.style.margin,
+                boxSizing: exportContainer.style.boxSizing
+            };
+            
+            const originalDisplays = [];
+            plans.forEach(p => {
+                originalDisplays.push(p.style.display);
+                p.style.display = 'none'; 
+            });
+
+            const A4_WIDTH = 1120;
+            const A4_HEIGHT = 1584;
+
+            exportContainer.style.width = `${A4_WIDTH}px`;
+            exportContainer.style.minWidth = `${A4_WIDTH}px`;
+            exportContainer.style.minHeight = `${A4_HEIGHT}px`;
+            exportContainer.style.margin = '0 auto';
+            exportContainer.style.boxSizing = 'border-box';
+            exportContainer.style.backgroundColor = '#ffffff';
+
+            const paperSize = document.getElementById('pdf-format').value;
+            const pdf = format === 'pdf' ? new window.jspdf.jsPDF('p', 'mm', paperSize) : null;
+            
+            try {
+                const loopCount = plans.length > 0 ? plans.length : 1;
+
+                for (let i = 0; i < loopCount; i++) {
+                    if (plans.length > 0) {
+                        plans[i].style.display = 'block';
+                    }
+
+                    await new Promise(resolve => setTimeout(resolve, 150));
+
+                    const canvas = await html2canvas(exportContainer, {
+                        scale: 2,
+                        backgroundColor: '#ffffff',
+                        useCORS: true,
+                        width: A4_WIDTH, 
+                        windowWidth: A4_WIDTH + 50, 
+                        ignoreElements: (el) => el.classList.contains('no-print')
+                    });
+
+                    if (format === 'jpg') {
+                        const link = document.createElement('a');
+                        const planName = plans.length > 0 ? `Plan_${String.fromCharCode(65 + i)}` : 'Status';
+                        link.download = `${document.getElementById('p-name').value || 'Patient'}_Treatment_${planName}.jpg`;
+                        link.href = canvas.toDataURL('image/jpeg', 0.9);
+                        link.click();
+                    } else if (format === 'pdf') {
+                        if (i > 0) pdf.addPage();
+                        
+                        const imgData = canvas.toDataURL('image/jpeg', 0.9);
+                        const pdfWidth = pdf.internal.pageSize.getWidth();
+                        const pdfHeight = pdf.internal.pageSize.getHeight();
+                        
+                        const imgProps = pdf.getImageProperties(imgData);
+                        const imgRatio = imgProps.width / imgProps.height;
+                        const pdfRatio = pdfWidth / pdfHeight;
+
+                        let printW = pdfWidth;
+                        let printH = pdfWidth / imgRatio;
+
+                        if (printH > pdfHeight) {
+                             const ratio = Math.min(pdfWidth / imgProps.width, pdfHeight / imgProps.height);
+                             printW = imgProps.width * ratio;
+                             printH = imgProps.height * ratio;
+                        }
+
+                        const x = (pdfWidth - printW) / 2;
+                        const y = 0; 
+
+                        pdf.addImage(imgData, 'JPEG', x, y, printW, printH);
+                    }
+
+                    if (plans.length > 0) {
+                        plans[i].style.display = 'none';
+                    }
+                }
+
+                if (format === 'pdf') {
+                    const fileName = `${document.getElementById('p-name').value || 'Patient'}_Dental_Plans.pdf`;
+                    pdf.save(fileName);
+                }
+
+            } catch (e) {
+                console.error("Export Error:", e);
+                alert("匯出發生錯誤");
+            } finally {
+                exportContainer.style.width = originalStyles.width;
+                exportContainer.style.minWidth = originalStyles.minWidth;
+                exportContainer.style.height = originalStyles.height;
+                exportContainer.style.minHeight = originalStyles.minHeight;
+                exportContainer.style.margin = originalStyles.margin;
+                exportContainer.style.boxSizing = originalStyles.boxSizing;
+
+                plans.forEach((p, i) => {
+                    p.style.display = originalDisplays[i];
+                });
+            }
+        }
+
+        window.exportToJPG = async () => { 
+            await generateSnapshots('jpg');
+        }
+
+        window.exportToPDF = async () => { 
+            await generateSnapshots('pdf');
+        }
+        
+        window.onload = function() { initData(); };
+    </script>
+</body>
 </html>
